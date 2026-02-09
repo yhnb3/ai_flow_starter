@@ -3,7 +3,6 @@ import type { Node, Edge, Connection, NodeTypes, NodeChange, EdgeChange } from '
 import {
   ReactFlow,
   Background,
-  Controls,
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
@@ -15,6 +14,7 @@ import StartNode from '../nodes/StartNode';
 import EndNode from '../nodes/EndNode';
 import NodePalette from '../nodes/NodePalette';
 import NodePropertiesPanel from '../properties/NodePropertiesPanel';
+import FloatablePanel from '../properties/FloatablePanel';
 import { createBPMNNode, type BPMNNodeType, type BPMNNode, type BPMNNodeData } from '../../types/bpmn';
 
 interface BPMNEditorProps {
@@ -142,14 +142,15 @@ const BPMNEditorContent: React.FC<BPMNEditorProps> = ({
           fitView
         >
           <Background />
-          <Controls />
         </ReactFlow>
       </div>
       {selectedNode && (
-        <NodePropertiesPanel
-          selectedNode={selectedNode}
-          onChange={handleNodePropertyChange}
-        />
+        <FloatablePanel title="Node Properties">
+          <NodePropertiesPanel
+            selectedNode={selectedNode}
+            onChange={handleNodePropertyChange}
+          />
+        </FloatablePanel>
       )}
     </div>
   );
