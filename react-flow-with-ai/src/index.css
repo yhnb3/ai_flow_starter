@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* IDE 아이콘 버튼 */
+.icon-btn {
+  @apply p-1.5 hover:bg-gray-800 rounded text-gray-400 hover:text-white transition-colors flex-shrink-0;
+}
+
+/* 탭 버튼 기본 스타일 */
+.tab-btn-base {
+  @apply flex items-center gap-2 px-4 py-2 rounded-t whitespace-nowrap cursor-pointer transition-colors;
+}
+
+/* 활성 탭 */
+.tab-btn-active {
+  @apply bg-gray-800 text-white border-t-2 border-blue-500;
+}
+
+/* 비활성 탭 */
+.tab-btn-inactive {
+  @apply bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-gray-200;
+}
+
+/* 스크롤 컨테이너 */
+.scrollbar-hide {
+  @apply overflow-x-auto overflow-y-hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
