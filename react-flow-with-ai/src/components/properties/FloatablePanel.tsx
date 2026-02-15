@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Rnd } from 'react-rnd';
 
 interface FloatablePanelProps {
@@ -18,17 +19,24 @@ interface PanelState {
 }
 
 interface DragState {
-  isDragging: boolean;
+  pointerId: number;
+  startX: number;
+  startY: number;
   offsetX: number;
-  offsetY: number;
+  hasFloated: boolean;
 }
 
-const DEFAULT_STATE: PanelState = {
-  mode: 'docked',
-  x: window.innerWidth - 350,
-  y: 100,
-  width: 320,
-  height: 400, // Header (~40px) + Content (360px)
+const getDefaultState = (): PanelState => {
+  const defaultX =
+    typeof window !== 'undefined' ? window.innerWidth - 350 : 970;
+
+  return {
+    mode: 'docked',
+    x: defaultX,
+    y: 100,
+    width: 320,
+    height: 400, // 헤더(~40px) + 본문(360px)
+  };
 };
 
 const FloatablePanel: React.FC<FloatablePanelProps> = ({ 
@@ -36,53 +44,91 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
   title = 'Properties',
   onClose 
 }) => {
+  const floatingShellRef = useRef<HTMLDivElement | null>(null);
+  const floatingHeaderRef = useRef<HTMLDivElement | null>(null);
+  const floatingMetricsRef = useRef({ headerTopInset: 1, headerHeight: 40 });
+  const defaultState = getDefaultState();
   const [panelState, setPanelState] = useState<PanelState>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    if (typeof window === 'undefined') {
+      return defaultState;
+    }
+
+    const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        return { ...DEFAULT_STATE, ...JSON.parse(saved) };
+        return { ...defaultState, ...JSON.parse(saved) };
       } catch {
-        return DEFAULT_STATE;
+        return defaultState;
       }
     }
-    return DEFAULT_STATE;
+    return defaultState;
   });
 
-  const [dragState, setDragState] = useState<DragState>({
-    isDragging: false,
-    offsetX: 0,
-    offsetY: 0,
-  });
+  const [dragState, setDragState] = useState<DragState | null>(null);
 
-  const rndRef = useRef<Rnd>(null);
-
-  // Save state to localStorage
+  // 패널 상태를 localStorage에 저장
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(panelState));
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(panelState));
+    }
   }, [panelState]);
 
-  // Handle continuous dragging when switching to floating mode
-  useEffect(() => {
-    if (!dragState.isDragging) return;
+  useLayoutEffect(() => {
+    if (panelState.mode !== 'floating') return;
+    const shell = floatingShellRef.current;
+    const header = floatingHeaderRef.current;
+    if (!shell || !header) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const shellRect = shell.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    floatingMetricsRef.current = {
+      headerTopInset: Math.max(headerRect.top - shellRect.top, 0),
+      headerHeight: Math.max(headerRect.height, 1),
+    };
+  }, [panelState.mode, panelState.width, panelState.height]);
+
+  // docked DOM이 사라진 뒤에도 동일 포인터를 계속 추적
+  useEffect(() => {
+    if (!dragState || typeof window === 'undefined') return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (e.pointerId !== dragState.pointerId) return;
+
+      const threshold = 5;
+      const deltaX = Math.abs(e.clientX - dragState.startX);
+      const deltaY = Math.abs(e.clientY - dragState.startY);
+      const shouldFloat = dragState.hasFloated || deltaX > threshold || deltaY > threshold;
+
+      if (!shouldFloat) return;
+
       setPanelState((prev) => ({
         ...prev,
+        mode: 'floating',
         x: e.clientX - dragState.offsetX,
-        y: e.clientY - dragState.offsetY,
+        y:
+          e.clientY -
+          (floatingMetricsRef.current.headerTopInset +
+            floatingMetricsRef.current.headerHeight / 2),
       }));
+
+      if (!dragState.hasFloated) {
+        setDragState((prev) => (prev ? { ...prev, hasFloated: true } : prev));
+      }
     };
 
-    const handleMouseUp = () => {
-      setDragState({ isDragging: false, offsetX: 0, offsetY: 0 });
+    const handlePointerEnd = (e: PointerEvent) => {
+      if (e.pointerId !== dragState.pointerId) return;
+      setDragState(null);
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerEnd);
+    window.addEventListener('pointercancel', handlePointerEnd);
 
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerEnd);
+      window.removeEventListener('pointercancel', handlePointerEnd);
     };
   }, [dragState]);
 
@@ -93,64 +139,27 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
     }));
   };
 
-  // Docked mode - fixed at bottom
+  // Docked 모드: 하단 고정
   if (panelState.mode === 'docked') {
     return (
       <div className="border-t border-gray-700 bg-gray-800">
         <div 
           className="flex items-center justify-between px-4 py-2 bg-gray-750 border-b border-gray-700 cursor-move hover:bg-gray-700 transition-colors"
-          onMouseDown={(e) => {
-            // Prevent text selection during drag
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
+            if ((e.target as HTMLElement).closest('button')) return;
             e.preventDefault();
-            console.log("x:", e.clientX, "y:", e.clientY);
-            const startX = e.clientX;
-            const startY = e.clientY;
-            const threshold = 5;
-            
-            // Measure the actual header height from the docked mode
-            const headerRect = e.currentTarget.getBoundingClientRect();
-            
-            // Always center the mouse on the header when converting to floating
-            const centerOffsetX = panelState.width / 2;
-            // Add 1px for border-top of the floating panel container
-            const centerOffsetY = headerRect.height / 2 + 1;
 
-            console.log(centerOffsetX, centerOffsetY);
-            
-            const handleMouseMove = (moveEvent: MouseEvent) => {
-              const deltaX = Math.abs(moveEvent.clientX - startX);
-              const deltaY = Math.abs(moveEvent.clientY - startY);
-              
-              // If moved more than threshold, switch to floating mode
-              if (deltaX > threshold || deltaY > threshold) {
-                // Position panel so mouse is at center of header
-                setPanelState((prev) => ({
-                  ...prev,
-                  mode: 'floating',
-                  x: moveEvent.clientX - centerOffsetX,
-                  y: moveEvent.clientY - centerOffsetY,
-                }));
-                
-                // Enable continuous dragging with centered offset
-                setDragState({
-                  isDragging: true,
-                  offsetX: moveEvent.clientX - centerOffsetX,
-                  offsetY: moveEvent.clientY - centerOffsetY,
-                });
-                
-                // Clean up these listeners as useEffect will take over
-                document.removeEventListener('mousemove', handleMouseMove);
-                document.removeEventListener('mouseup', handleMouseUp);
-              }
-            };
-            
-            const handleMouseUp = () => {
-              document.removeEventListener('mousemove', handleMouseMove);
-              document.removeEventListener('mouseup', handleMouseUp);
-            };
-            
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
+            // docked에서 끌어올릴 때 커서가 floating 헤더 중앙 근처를 유지하도록 계산
+            const offsetX = panelState.width / 2;
+
+            setDragState({
+              pointerId: e.pointerId,
+              startX: e.clientX,
+              startY: e.clientY,
+              offsetX,
+              hasFloated: false,
+            });
           }}
         >
           <div className="flex items-center gap-2">
@@ -189,18 +198,11 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
     );
   }
 
-  console.log('Rendering floating panel at', panelState.x, panelState.y);
-
-  // Floating mode - draggable and resizable
-  return (
+  // Floating 모드: 드래그/리사이즈 가능
+  const floatingPanel = (
     <Rnd
-      ref={rndRef}
       position={{ x: panelState.x, y: panelState.y }}
       size={{ width: panelState.width, height: panelState.height }}
-      onDragStart={() => {
-        // Disable our custom dragging when Rnd takes over
-        setDragState({ isDragging: false, offsetX: 0, offsetY: 0 });
-      }}
       onDragStop={(_e, d) => {
         setPanelState((prev) => ({ ...prev, x: d.x, y: d.y }));
       }}
@@ -218,11 +220,16 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
       bounds="window"
       dragHandleClassName="drag-handle"
       className="shadow-2xl rounded-lg overflow-hidden"
-      style={{ zIndex: 1000 }}
-      disableDragging={dragState.isDragging}
+      style={{ zIndex: 1000, position: 'fixed' }}
     >
-      <div className="w-full h-full flex flex-col bg-gray-800 border border-gray-700 rounded-lg">
-        <div className="drag-handle flex items-center justify-between px-4 py-2 bg-gray-750 border-b border-gray-700 cursor-move hover:bg-gray-700 transition-colors">
+      <div
+        ref={floatingShellRef}
+        className="w-full h-full flex flex-col bg-gray-800 border border-gray-700 rounded-lg"
+      >
+        <div
+          ref={floatingHeaderRef}
+          className="drag-handle flex items-center justify-between px-4 py-2 bg-gray-750 border-b border-gray-700 cursor-move hover:bg-gray-700 transition-colors"
+        >
           <div className="flex items-center gap-2">
             <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
@@ -258,6 +265,12 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
       </div>
     </Rnd>
   );
+
+  if (typeof document === 'undefined') {
+    return floatingPanel;
+  }
+
+  return createPortal(floatingPanel, document.body);
 };
 
 export default FloatablePanel;

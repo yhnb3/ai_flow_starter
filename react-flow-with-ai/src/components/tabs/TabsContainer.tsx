@@ -15,32 +15,47 @@ const TabsContainer: React.FC = () => {
     },
   ]);
 
-  const [activeDiagramId, setActiveDiagramId] = useState<string>('1');
+  const [activeDiagramId, setActiveDiagramId] = useState<string | null>('1');
 
   const activeDiagram = diagrams.find((d) => d.id === activeDiagramId);
 
   const handleAddDiagram = useCallback(() => {
-    const newId = String(Math.max(...diagrams.map((d) => parseInt(d.id)), 0) + 1);
-    const newDiagram: Diagram = {
-      id: newId,
-      name: `Diagram ${newId}`,
-      nodes: [],
-      edges: [],
-      isModified: false,
-      createdAt: new Date(),
-    };
-    setDiagrams((prev) => [...prev, newDiagram]);
-    setActiveDiagramId(newId);
-  }, [diagrams]);
+    setDiagrams((prev) => {
+      const numericIds = prev
+        .map((d) => Number.parseInt(d.id, 10))
+        .filter((id) => Number.isFinite(id));
+      const newId = String(Math.max(...numericIds, 0) + 1);
+      const newDiagram: Diagram = {
+        id: newId,
+        name: `Diagram ${newId}`,
+        nodes: [],
+        edges: [],
+        isModified: false,
+        createdAt: new Date(),
+      };
+
+      setActiveDiagramId(newId);
+      return [...prev, newDiagram];
+    });
+  }, []);
 
   const handleCloseDiagram = useCallback((id: string) => {
     setDiagrams((prev) => {
+      const closedIndex = prev.findIndex((d) => d.id === id);
       const filtered = prev.filter((d) => d.id !== id);
-      if (filtered.length === 0) return prev;
+
+      setActiveDiagramId((currentActiveId) => {
+        if (currentActiveId !== id) return currentActiveId;
+        if (filtered.length === 0) return null;
+
+        const nextDiagram =
+          filtered[closedIndex] ?? filtered[closedIndex - 1] ?? filtered[0];
+        return nextDiagram.id;
+      });
+
       return filtered;
     });
-    setActiveDiagramId((prev) => (prev === id ? diagrams[0]?.id : prev));
-  }, [diagrams]);
+  }, []);
 
   const handleSelectDiagram = useCallback((id: string) => {
     setActiveDiagramId(id);
@@ -53,14 +68,24 @@ const TabsContainer: React.FC = () => {
   }, []);
 
   if (!activeDiagram) {
-    return <div className="flex items-center justify-center h-full">No diagrams</div>;
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-300">
+        <div>No diagrams</div>
+        <button
+          onClick={handleAddDiagram}
+          className="px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white text-sm"
+        >
+          Add diagram
+        </button>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col h-screen bg-gray-900">
       <TabNavigation
         diagrams={diagrams}
-        activeDiagramId={activeDiagramId}
+        activeDiagramId={activeDiagram.id}
         onSelectDiagram={handleSelectDiagram}
         onAddDiagram={handleAddDiagram}
         onCloseDiagram={handleCloseDiagram}
