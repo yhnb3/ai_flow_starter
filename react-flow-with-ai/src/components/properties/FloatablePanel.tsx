@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Rnd } from 'react-rnd';
+import DockDropZone from './DockDropZone';
+import { createRect, getDockZoneRect, shouldDockPanel } from '../../utils/dockDropZone';
 
 interface FloatablePanelProps {
   children: React.ReactNode;
@@ -65,6 +67,15 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
   });
 
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [showDockDropZone, setShowDockDropZone] = useState(false);
+  const [isDockDropZoneActive, setIsDockDropZoneActive] = useState(false);
+
+  const checkDockByPosition = useCallback((x: number, y: number, width: number, height: number): boolean => {
+    if (typeof window === 'undefined') return false;
+    const panelRect = createRect(x, y, width, height);
+    const dockZoneRect = getDockZoneRect(window.innerWidth, window.innerHeight);
+    return shouldDockPanel(panelRect, dockZoneRect);
+  }, []);
 
   // 패널 상태를 localStorage에 저장
   useEffect(() => {
@@ -101,14 +112,20 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
 
       if (!shouldFloat) return;
 
+      const nextX = e.clientX - dragState.offsetX;
+      const nextY =
+        e.clientY -
+        (floatingMetricsRef.current.headerTopInset + floatingMetricsRef.current.headerHeight / 2);
+      const isDockTarget = checkDockByPosition(nextX, nextY, panelState.width, panelState.height);
+
+      setShowDockDropZone(true);
+      setIsDockDropZoneActive(isDockTarget);
+
       setPanelState((prev) => ({
         ...prev,
         mode: 'floating',
-        x: e.clientX - dragState.offsetX,
-        y:
-          e.clientY -
-          (floatingMetricsRef.current.headerTopInset +
-            floatingMetricsRef.current.headerHeight / 2),
+        x: nextX,
+        y: nextY,
       }));
 
       if (!dragState.hasFloated) {
@@ -118,6 +135,22 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
 
     const handlePointerEnd = (e: PointerEvent) => {
       if (e.pointerId !== dragState.pointerId) return;
+
+      const nextX = e.clientX - dragState.offsetX;
+      const nextY =
+        e.clientY -
+        (floatingMetricsRef.current.headerTopInset + floatingMetricsRef.current.headerHeight / 2);
+      const shouldDock = dragState.hasFloated
+        ? checkDockByPosition(nextX, nextY, panelState.width, panelState.height)
+        : false;
+
+      setShowDockDropZone(false);
+      setIsDockDropZoneActive(false);
+
+      if (shouldDock) {
+        setPanelState((prev) => ({ ...prev, mode: 'docked' }));
+      }
+
       setDragState(null);
     };
 
@@ -130,7 +163,7 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
       window.removeEventListener('pointerup', handlePointerEnd);
       window.removeEventListener('pointercancel', handlePointerEnd);
     };
-  }, [dragState]);
+  }, [dragState, panelState.width, panelState.height, checkDockByPosition]);
 
   const toggleMode = () => {
     setPanelState((prev) => ({
@@ -200,70 +233,92 @@ const FloatablePanel: React.FC<FloatablePanelProps> = ({
 
   // Floating 모드: 드래그/리사이즈 가능
   const floatingPanel = (
-    <Rnd
-      position={{ x: panelState.x, y: panelState.y }}
-      size={{ width: panelState.width, height: panelState.height }}
-      onDragStop={(_e, d) => {
-        setPanelState((prev) => ({ ...prev, x: d.x, y: d.y }));
-      }}
-      onResizeStop={(_e, _direction, ref, _delta, position) => {
-        setPanelState((prev) => ({
-          ...prev,
-          width: parseInt(ref.style.width),
-          height: parseInt(ref.style.height),
-          x: position.x,
-          y: position.y,
-        }));
-      }}
-      minWidth={280}
-      minHeight={200}
-      bounds="window"
-      dragHandleClassName="drag-handle"
-      className="shadow-2xl rounded-lg overflow-hidden"
-      style={{ zIndex: 1000, position: 'fixed' }}
-    >
-      <div
-        ref={floatingShellRef}
-        className="w-full h-full flex flex-col bg-gray-800 border border-gray-700 rounded-lg"
+    <>
+      <Rnd
+        position={{ x: panelState.x, y: panelState.y }}
+        size={{ width: panelState.width, height: panelState.height }}
+        onDragStart={(_e, d) => {
+          const isDockTarget = checkDockByPosition(d.x, d.y, panelState.width, panelState.height);
+          setShowDockDropZone(true);
+          setIsDockDropZoneActive(isDockTarget);
+        }}
+        onDrag={(_e, d) => {
+          const isDockTarget = checkDockByPosition(d.x, d.y, panelState.width, panelState.height);
+          setIsDockDropZoneActive(isDockTarget);
+        }}
+        onDragStop={(_e, d) => {
+          const shouldDock = checkDockByPosition(d.x, d.y, panelState.width, panelState.height);
+
+          setShowDockDropZone(false);
+          setIsDockDropZoneActive(false);
+
+          if (shouldDock) {
+            setPanelState((prev) => ({ ...prev, mode: 'docked' }));
+            return;
+          }
+
+          setPanelState((prev) => ({ ...prev, x: d.x, y: d.y }));
+        }}
+        onResizeStop={(_e, _direction, ref, _delta, position) => {
+          setPanelState((prev) => ({
+            ...prev,
+            width: parseInt(ref.style.width),
+            height: parseInt(ref.style.height),
+            x: position.x,
+            y: position.y,
+          }));
+        }}
+        minWidth={280}
+        minHeight={200}
+        bounds="window"
+        dragHandleClassName="drag-handle"
+        className="shadow-2xl rounded-lg overflow-hidden"
+        style={{ zIndex: 1000, position: 'fixed' }}
       >
         <div
-          ref={floatingHeaderRef}
-          className="drag-handle flex items-center justify-between px-4 py-2 bg-gray-750 border-b border-gray-700 cursor-move hover:bg-gray-700 transition-colors"
+          ref={floatingShellRef}
+          className="w-full h-full flex flex-col bg-gray-800 border border-gray-700 rounded-lg"
         >
-          <div className="flex items-center gap-2">
-            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
-            </svg>
-            <h3 className="text-sm font-semibold text-gray-300">{title}</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={toggleMode}
-              className="p-1 rounded hover:bg-gray-600 transition-colors"
-              title="Dock panel"
-            >
+          <div
+            ref={floatingHeaderRef}
+            className="drag-handle flex items-center justify-between px-4 py-2 bg-gray-750 border-b border-gray-700 cursor-move hover:bg-gray-700 transition-colors"
+          >
+            <div className="flex items-center gap-2">
               <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4m0-8V4m0 0h-4m4 0l-5 5M4 8l5-5" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
               </svg>
-            </button>
-            {onClose && (
+              <h3 className="text-sm font-semibold text-gray-300">{title}</h3>
+            </div>
+            <div className="flex items-center gap-2">
               <button
-                onClick={onClose}
+                onClick={toggleMode}
                 className="p-1 rounded hover:bg-gray-600 transition-colors"
-                title="Close panel"
+                title="Dock panel"
               >
                 <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4m0-8V4m0 0h-4m4 0l-5 5M4 8l5-5" />
                 </svg>
               </button>
-            )}
+              {onClose && (
+                <button
+                  onClick={onClose}
+                  className="p-1 rounded hover:bg-gray-600 transition-colors"
+                  title="Close panel"
+                >
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex-1 p-4 overflow-auto">
+            {children}
           </div>
         </div>
-        <div className="flex-1 p-4 overflow-auto">
-          {children}
-        </div>
-      </div>
-    </Rnd>
+      </Rnd>
+      <DockDropZone visible={showDockDropZone} active={isDockDropZoneActive} />
+    </>
   );
 
   if (typeof document === 'undefined') {
